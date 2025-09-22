@@ -22,16 +22,23 @@ public class SecurityConfig {
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/**", "/api/product/all", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
-                        .requestMatchers("/api/product/add", "/api/product/update/**", "/api/product/delete/**").hasRole("ADMIN")
-                        .requestMatchers("/api/cart/**", "/api/order/place", "/api/order").hasRole("USER")
-                        .requestMatchers("/api/order/all").hasRole("ADMIN")
+                        // ===== AUTH (public) =====
+                        .requestMatchers("/api/auth/**",
+                                "/swagger-ui.html",
+                                "/swagger-ui/**",
+                                "/v3/api-docs/**").permitAll()
+
+                        .requestMatchers("/api/products/**").hasRole("ADMIN")
                         .anyRequest().authenticated()
+
+
                 )
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+
         return http.build();
     }
+
 
     @Bean
     public PasswordEncoder passwordEncoder() {

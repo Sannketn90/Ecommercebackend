@@ -1,8 +1,10 @@
 package com.project.ecommerce.exception;
 
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
 import com.project.ecommerce.apiresponse.ApiResponse;
 import com.project.ecommerce.apiresponse.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
@@ -14,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
 
@@ -57,6 +60,24 @@ public class GlobalExceptionHandler {
         return buildErrorResponse(ex.getMessage(), ErrorCode.INVALID_TOKEN, HttpStatus.UNAUTHORIZED);
     }
 
+    // Product Not Found Exception
+    @ExceptionHandler(ProductNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProductNotFoundException(ProductNotFoundException ex) {
+        return buildErrorResponse(ex.getMessage(), ErrorCode.PRODUCT_NOT_FOUND, HttpStatus.NOT_FOUND);
+    }
+
+    // Cart Item Not Found Exception
+    @ExceptionHandler(CartItemNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCartItemNotFoundException(CartItemNotFoundException ex) {
+        return buildErrorResponse(ex.getMessage(), ErrorCode.CART_ITEM_NOT_FOUND, HttpStatus.NOT_FOUND);
+    }
+
+    // Cart Empty Exception
+    @ExceptionHandler(CartEmptyException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCartEmptyException(CartEmptyException ex) {
+        return buildErrorResponse(ex.getMessage(), ErrorCode.CART_EMPTY, HttpStatus.BAD_REQUEST);
+    }
+
     // Spring Security authentication failure
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiResponse<Void>> handleAuthenticationException(AuthenticationException ex) {
@@ -73,11 +94,21 @@ public class GlobalExceptionHandler {
     // Generic fallback
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneralException(Exception ex) {
+        log.error("Unhandled exception occurred", ex); // ✅ full stacktrace console પર આવશે
         return buildErrorResponse("Something went wrong", ErrorCode.INTERNAL_ERROR, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
+    @ExceptionHandler(InvalidFormatException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidFormat(InvalidFormatException ex) {
+        String fieldName = ex.getPath().get(0).getFieldName();
+        String msg = "Invalid format for field: " + fieldName + ". " +
+                "Expected valid UUID.";
+        return buildErrorResponse(msg, ErrorCode.VALIDATION_ERROR, HttpStatus.BAD_REQUEST);
+    }
+
+
     private ResponseEntity<ApiResponse<Void>> buildErrorResponse(String message, ErrorCode errorCode, HttpStatus status) {
-        ApiResponse<Void> body = ApiResponse.error(message, errorCode, status);
+        ApiResponse<Void> body = ApiResponse.error(message, errorCode);
         return new ResponseEntity<>(body, status);
     }
 

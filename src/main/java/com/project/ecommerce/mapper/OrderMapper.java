@@ -1,16 +1,30 @@
 package com.project.ecommerce.mapper;
 
-import com.project.ecommerce.dto.OrderDTO;
+import com.project.ecommerce.dto.OrderItemDTO;
+import com.project.ecommerce.dto.OrderResponse;
 import com.project.ecommerce.entity.Order;
+import com.project.ecommerce.entity.OrderItem;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
-@Mapper(componentModel = "spring", uses = {UserMapper.class, CartItemMapper.class})
+import java.util.List;
+
+@Mapper(componentModel = "spring")
 public interface OrderMapper {
 
-    @Mapping(source = "status", target = "status") // enum → string
-    OrderDTO toDTO(Order order);
+    @Mapping(source = "product.name", target = "productName")
+    OrderItemDTO toDTO(OrderItem item);
 
-    @Mapping(source = "status", target = "status") // string → enum
-    Order toEntity(OrderDTO orderDTO);
+    default OrderResponse toResponse(Order order) {
+        List<OrderItemDTO> items = order.getItems().stream()
+                .map(this::toDTO).toList();
+
+        OrderResponse response = new OrderResponse();
+        response.setOrderId(order.getOrderId());
+        response.setItems(items);
+        response.setTotalAmount(order.getTotalAmount());
+        response.setStatus(order.getStatus());
+        response.setPlacedAt(order.getPlacedAt());
+        return response;
+    }
 }

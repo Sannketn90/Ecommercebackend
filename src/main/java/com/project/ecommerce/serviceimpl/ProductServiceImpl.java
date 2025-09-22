@@ -1,7 +1,9 @@
 package com.project.ecommerce.serviceimpl;
 
 import com.project.ecommerce.dto.ProductDTO;
+import com.project.ecommerce.dto.ProductRequest;
 import com.project.ecommerce.entity.Product;
+import com.project.ecommerce.entity.Role;
 import com.project.ecommerce.entity.User;
 import com.project.ecommerce.exception.ResourceNotFoundException;
 import com.project.ecommerce.exception.UnauthorizedActionException;
@@ -12,95 +14,132 @@ import com.project.ecommerce.repository.UserRepository;
 import com.project.ecommerce.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ProductServiceImpl implements ProductService {
 
-
-
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final ProductMapper productMapper;
 
+    // ================= ADD PRODUCT =================
     @Override
-    public ProductDTO addProduct(ProductDTO productDTO, String username) {
-        log.info("Adding product: {} by user ID: {}", productDTO.getName(), username);
+    @Transactional
+    @CacheEvict(value = "products", allEntries = true)
+    public ProductDTO addProduct(ProductRequest request, String username) {
+        log.info("Adding product: {} by user: {}", request.getName(), username);
 
-        Optional<User> byUsername = userRepository.findByUsername(username);
-        User user = byUsername.orElseThrow(() -> {
-            log.error("User not found with username: {}", username);
-            return new UserNotFoundException(username);
-        });
+        User user = getUserOrThrow(username);
 
-        Product product = productMapper.toEntity(productDTO);
+        Product product = productMapper.toEntity(request);
         product.setUser(user);
 
-        Product savedProduct = productRepository.save(product);
-        log.info("Product added successfully: {}", productDTO.getName());
-        return productMapper.toDTO(savedProduct);
+        Product saved = productRepository.save(product);
+        log.info("Product added successfully: {}", saved.getProductId());
+
+        return productMapper.toDTO(saved);
     }
 
+    // ================= UPDATE PRODUCT =================
     @Override
-    public ProductDTO updateProduct(Long id, ProductDTO productDTO, Long userId) {
-        log.info("Updating product with ID: {} by user ID: {}", id, userId);
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "products", key = "#productId"),
+            @CacheEvict(value = "products", key = "'allProducts'")
+    })
+    public ProductDTO updateProduct(UUID productId, ProductRequest request, String username) {
+        log.info("Updating product ID: {} by user: {}", productId, username);
 
-        Product existing = productRepository.findById(id)
-                .orElseThrow(() -> {
-                    log.warn("Product ID not found with ID: {}", id);
-                    return new ResourceNotFoundException("Product not found with ID: " + id);
-                });
-        if (!existing.getUser().getId().equals(userId)) {
-            log.error("User ID: {} not authorized to update product ID: {}", userId, id);
+        Product existing = getProductOrThrow(productId);
+        User user = getUserOrThrow(username);
+
+        if (!existing.getUser().getUserId().equals(user.getUserId()) && user.getRole() != Role.ADMIN) {
+            log.warn("Unauthorized update attempt by user: {}", username);
             throw new UnauthorizedActionException("Not authorized to update this product");
         }
-        existing.setName(productDTO.getName());
-        existing.setPrice(productDTO.getPrice());
-        existing.setDescription(productDTO.getDescription());
-        Product updatedProduct = productRepository.save(existing);
 
-        log.info("Product updated successfully: {}", id);
-        return productMapper.toDTO(updatedProduct);
+        existing.setName(request.getName());
+        existing.setPrice(request.getPrice());
+        existing.setDescription(request.getDescription());
+
+        Product updated = productRepository.save(existing);
+        log.info("Product updated: {}", updated.getProductId());
+
+        return productMapper.toDTO(updated);
     }
 
+    // ================= DELETE PRODUCT =================
     @Override
-    public void deleteProduct(Long id, Long userId) {
-        log.info("Deleting product with ID: {} by user ID: {}", id, userId);
-        Product product = productRepository.findById(id)
-                .orElseThrow(() -> {
-                    log.warn("Product not found with ID: {}", id);
-                    return new ResourceNotFoundException("Product not found" + id);
-                });
-        if (!product.getUser().getId().equals(userId)) {
-            log.warn("Unauthorized attempt: User ID '{}' tried to delete product ID '{}'", userId, id);
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(value = "products", key = "#productId"),
+            @CacheEvict(value = "products", key = "'allProducts'")
+    })
+    public void deleteProduct(UUID productId, String username) {
+        log.info("Deleting product ID: {} by user: {}", productId, username);
+
+        Product product = getProductOrThrow(productId);
+        User user = getUserOrThrow(username);
+
+        if (!product.getUser().getUserId().equals(user.getUserId()) && user.getRole() != Role.ADMIN) {
+            log.warn("Unauthorized delete attempt by user: {}", username);
             throw new UnauthorizedActionException("Not authorized to delete this product");
         }
-        productRepository.deleteById(id);
-        log.info("Product deleted successfully: {}", id);
+
+
+        productRepository.deleteById(productId);
+        log.info("Product deleted: {}", productId);
     }
 
+    // ================= GET ALL PRODUCTS =================
     @Override
+    @Cacheable(value = "products", key = "'allProducts'")
+    @Transactional(readOnly = true)
     public List<ProductDTO> getAllProducts() {
-        log.debug("Fetching all products");
-        return productRepository.findAll().stream()
+        log.debug("Cache MISS → Fetching all products from DB");
+
+        List<Product> products = productRepository.findAll();
+        List<ProductDTO> productDTOs = products.stream()
                 .map(productMapper::toDTO)
                 .toList();
+
+        log.info("Fetched {} products from DB", productDTOs.size());
+        return productDTOs;
     }
 
+    // ================= GET PRODUCT BY ID =================
     @Override
-    public Product findById(Long id) {
-        log.debug("Fetching product with ID: {}", id);
-        return productRepository.findById(id)
+    @Cacheable(value = "products", key = "#productId")
+    @Transactional(readOnly = true)
+    public ProductDTO getById(UUID productId) {
+        log.debug("Cache MISS → Fetching product DTO for ID: {}", productId);
+        return productMapper.toDTO(getProductOrThrow(productId));
+    }
+
+    // ================= INTERNAL =================
+    private Product getProductOrThrow(UUID productId) {
+        return productRepository.findById(productId)
                 .orElseThrow(() -> {
-                    log.error("Product not found with ID: {}", id);
-                    return new ResourceNotFoundException("Product not found"+ id);
+                    log.error("Product not found: {}", productId);
+                    return new ResourceNotFoundException("Product not found: " + productId);
                 });
     }
 
-
+    private User getUserOrThrow(String username) {
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> {
+                    log.error("User not found: {}", username);
+                    return new UserNotFoundException(username);
+                });
+    }
 }

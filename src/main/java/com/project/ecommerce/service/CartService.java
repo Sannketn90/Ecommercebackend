@@ -1,18 +1,19 @@
 package com.project.ecommerce.service;
 
-
-import com.project.ecommerce.dto.CartDTO;
 import com.project.ecommerce.dto.CartRequest;
-import com.project.ecommerce.dto.CartUpdateRequest;
+import com.project.ecommerce.dto.CartResponse;
 
-import java.util.List;
+import java.util.UUID;
 
 public interface CartService {
-    CartDTO addToCart(CartRequest request, String username);
 
-    List<CartDTO> getCartByUsername(String username);
+    CartResponse getCart(String username);
 
-    CartDTO updateCart(CartUpdateRequest request, String username);
+    CartResponse addToCart(String username, CartRequest request);
 
-    void removeFromCart(Long cartId, String username);
+    CartResponse updateItem(String username, UUID itemId, int quantity);
+
+    void removeItem(String username, UUID itemId);
+
+    void clearCart(String username);
 }

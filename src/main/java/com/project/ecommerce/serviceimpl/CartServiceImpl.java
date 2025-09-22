@@ -1,138 +1,152 @@
 package com.project.ecommerce.serviceimpl;
 
-import com.project.ecommerce.dto.CartDTO;
 import com.project.ecommerce.dto.CartRequest;
-import com.project.ecommerce.dto.CartUpdateRequest;
+import com.project.ecommerce.dto.CartResponse;
 import com.project.ecommerce.entity.Cart;
+import com.project.ecommerce.entity.CartItem;
 import com.project.ecommerce.entity.Product;
 import com.project.ecommerce.entity.User;
-import com.project.ecommerce.exception.ResourceNotFoundException;
-import com.project.ecommerce.exception.UnauthorizedActionException;
+import com.project.ecommerce.exception.CartItemNotFoundException;
+import com.project.ecommerce.exception.ProductNotFoundException;
 import com.project.ecommerce.exception.UserNotFoundException;
 import com.project.ecommerce.mapper.CartMapper;
 import com.project.ecommerce.repository.CartRepository;
+import com.project.ecommerce.repository.ProductRepository;
 import com.project.ecommerce.repository.UserRepository;
 import com.project.ecommerce.service.CartService;
-import com.project.ecommerce.service.ProductService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 @Slf4j
 public class CartServiceImpl implements CartService {
 
     private final CartRepository cartRepository;
+    private final ProductRepository productRepository;
     private final UserRepository userRepository;
-    private final ProductService productService;
     private final CartMapper cartMapper;
 
     @Override
-    public CartDTO addToCart(CartRequest request, String username) {
-        log.info("Adding product ID: {} to cart for user: {}", request.getProductId(), username);
-
-        // Find user
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> {
-                    log.error("User not found with username: {}", username);
-                    return new UserNotFoundException("User not found with username: " + username);
-                });
-
-        // Find product
-        Product product = productService.findById(request.getProductId());
-
-        // Create new cart entry
-        Cart cart = new Cart();
-        cart.setUser(user);
-        cart.setProducts(List.of(product));
-        cart.setQuantity(request.getQuantity());
-        cart.setTotalPrice(request.getQuantity() * product.getPrice());
-
-        Cart savedCart = cartRepository.save(cart);
-        log.info("Product {} added to cart successfully", request.getProductId());
-
-        return cartMapper.toDTO(savedCart);
+    @Cacheable(value = "cart", key = "#username", unless = "#result == null")
+    public CartResponse getCart(String username) {
+        log.info("Fetching cart for user: {}", username);
+        Cart cart = getOrCreateCart(username);
+        return cartMapper.toCartResponse(cart);
     }
 
     @Override
-    public List<CartDTO> getCartByUsername(String username) {
-        log.debug("Fetching cart for user: {}", username);
+    @CacheEvict(value = "cart", key = "#username")
+    public CartResponse addToCart(String username, CartRequest request) {
+        log.info("Adding product {} to cart for user: {}", request.getProductId(), username);
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
+        Cart cart = getOrCreateCart(username);
+        Product product = productRepository.findById(request.getProductId())
+                .orElseThrow(() -> {
+                    log.error("Product not found: {}", request.getProductId());
+                    return new ProductNotFoundException(request.getProductId());
+                });
 
-        List<Cart> carts = cartRepository.findByUser(user);
-        List<CartDTO> cartDTOs = new ArrayList<>();
+        CartItem existingItem = cart.getItems().stream()
+                .filter(i -> i.getProduct().getProductId().equals(product.getProductId()))
+                .findFirst()
+                .orElse(null);
 
-        for (Cart cart : carts) {
-            cartDTOs.add(cartMapper.toDTO(cart)); // ✅ entity → DTO
+        if (existingItem != null) {
+            existingItem.setQuantity(existingItem.getQuantity() + request.getQuantity());
+            log.info("Updated quantity for existing item: {}", existingItem.getItemId());
+        } else {
+            CartItem item = new CartItem();
+            item.setCart(cart);
+            item.setProduct(product);
+            item.setQuantity(request.getQuantity());
+            item.setPriceSnapshot(product.getPrice());
+            cart.getItems().add(item);
+            log.info("Added new item to cart: {}", product.getName());
         }
 
-        return cartDTOs;
+        recalculateTotal(cart);
+        Cart saved = cartRepository.save(cart);
+        return cartMapper.toCartResponse(saved);
     }
 
     @Override
-    public CartDTO updateCart(CartUpdateRequest request, String username) {
-        log.info("Updating cart item ID: {} with quantity: {} for user: {}", request.getCartId(), request.getQuantity(), username);
+    @CacheEvict(value = "cart", key = "#username")
+    public CartResponse updateItem(String username, UUID itemId, int quantity) {
+        log.info("Updating item {} in cart for user: {}", itemId, username);
 
-        User user = userRepository.findByUsername(username)
+        Cart cart = getOrCreateCart(username);
+        CartItem item = cart.getItems().stream()
+                .filter(i -> i.getItemId().equals(itemId))
+                .findFirst()
                 .orElseThrow(() -> {
-                    log.error("User not found with username: {}", username);
-                    return new UserNotFoundException("User not found with username: " + username);
+                    log.error("Cart item not found: {}", itemId);
+                    return new CartItemNotFoundException(itemId);
                 });
 
-        Cart cart = cartRepository.findById(request.getCartId())
-                .orElseThrow(() -> {
-                    log.error("Cart item not found: {}", request.getCartId());
-                    return new ResourceNotFoundException("Cart not found with ID: " + request.getCartId());
-                });
+        item.setQuantity(quantity);
+        recalculateTotal(cart);
 
-        // Ownership check
-        if (!cart.getUser().getId().equals(user.getId())) {
-            log.error("Unauthorized update attempt by {} on cart {}", username, request.getCartId());
-            throw new UnauthorizedActionException("You are not allowed to update this cart");
-        }
-
-        // Update quantity + price
-        cart.setQuantity(request.getQuantity());
-        double totalPrice = cart.getProducts().stream()
-                .mapToDouble(Product::getPrice)
-                .sum() * request.getQuantity();
-        cart.setTotalPrice(totalPrice);
-
-        Cart updateCart = cartRepository.save(cart);
-        log.info("Cart item updated successfully: {}", request.getCartId());
-
-        return cartMapper.toDTO(updateCart);
+        Cart saved = cartRepository.save(cart);
+        return cartMapper.toCartResponse(saved);
     }
 
     @Override
-    public void removeFromCart(Long cartId, String username) {
-        log.info("Removing cart item ID: {} for user: {}", cartId, username);
+    @CacheEvict(value = "cart", key = "#username")
+    public void removeItem(String username, UUID itemId) {
+        log.info("Removing item {} from cart for user: {}", itemId, username);
 
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> {
-                    log.error("User not found with username: {}", username);
-                    return new ResourceNotFoundException("User not found with username: " + username);
-                });
+        Cart cart = getOrCreateCart(username);
+        boolean removed = cart.getItems().removeIf(i -> i.getItemId().equals(itemId));
 
-        Cart cart = cartRepository.findById(cartId)
-                .orElseThrow(() -> {
-                    log.error("Cart item not found: {}", cartId);
-                    return new ResourceNotFoundException("Cart not found with ID: " + cartId);
-                });
-
-        // Ownership check
-        if (!cart.getUser().getId().equals(user.getId())) {
-            log.error("Unauthorized remove attempt by {} on cart {}", username, cartId);
-            throw new UnauthorizedActionException("You are not allowed to remove this cart");
+        if (!removed) {
+            log.warn("Attempted to remove non-existent item: {}", itemId);
+            throw new CartItemNotFoundException(itemId);
         }
 
-        cartRepository.delete(cart);
-        log.info("Cart item removed successfully: {}", cartId);
+        recalculateTotal(cart);
+        cartRepository.save(cart);
+    }
+
+    @Override
+    @CacheEvict(value = "cart", key = "#username")
+    public void clearCart(String username) {
+        log.info("Clearing cart for user: {}", username);
+        Cart cart = getOrCreateCart(username);
+        cart.getItems().clear();
+        cart.setTotalPrice(0);
+        cartRepository.save(cart);
+    }
+
+    private Cart getOrCreateCart(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> {
+                    log.error("User not found: {}", username);
+                    return new UserNotFoundException(username);
+                });
+
+        return cartRepository.findByUser(user)
+                .orElseGet(() -> {
+                    log.info("Creating new cart for user: {}", username);
+                    Cart newCart = new Cart();
+                    newCart.setUser(user);
+                    newCart.setTotalPrice(0);
+                    return cartRepository.save(newCart);
+                });
+    }
+
+    private void recalculateTotal(Cart cart) {
+        double total = cart.getItems().stream()
+                .mapToDouble(i -> i.getPriceSnapshot() * i.getQuantity())
+                .sum();
+        cart.setTotalPrice(total);
+        log.debug("Recalculated cart total: {}", total);
     }
 }

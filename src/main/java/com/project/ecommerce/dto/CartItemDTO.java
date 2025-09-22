@@ -2,10 +2,13 @@ package com.project.ecommerce.dto;
 
 import lombok.Data;
 
+import java.util.UUID;
+
 @Data
 public class CartItemDTO {
-    private Long id;
-    private Long productId;
+
+    private UUID itemId;
+    private String productName;
     private int quantity;
-    private double price;
+    private double priceSnapshot;
 }

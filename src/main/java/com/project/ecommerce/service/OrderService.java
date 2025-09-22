@@ -1,7 +1,8 @@
 package com.project.ecommerce.service;
 
-import com.project.ecommerce.dto.OrderDTO;
+import com.project.ecommerce.dto.OrderResponse;
 
 public interface OrderService {
-    OrderDTO placeOrder(String username);
+
+    OrderResponse placeOrder(String username);
 }

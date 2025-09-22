@@ -1,82 +1,95 @@
 package com.project.ecommerce.serviceimpl;
 
-import com.project.ecommerce.dto.CartDTO;
-import com.project.ecommerce.dto.OrderDTO;
-import com.project.ecommerce.dto.ProductDTO;
-import com.project.ecommerce.entity.CartItem;
-import com.project.ecommerce.entity.Order;
-import com.project.ecommerce.entity.OrderStatus;
-import com.project.ecommerce.entity.User;
+import com.project.ecommerce.dto.OrderResponse;
+import com.project.ecommerce.entity.*;
+import com.project.ecommerce.exception.CartEmptyException;
 import com.project.ecommerce.exception.ResourceNotFoundException;
+import com.project.ecommerce.exception.UserNotFoundException;
 import com.project.ecommerce.mapper.OrderMapper;
+import com.project.ecommerce.repository.CartRepository;
 import com.project.ecommerce.repository.OrderRepository;
 import com.project.ecommerce.repository.UserRepository;
-import com.project.ecommerce.service.CartService;
 import com.project.ecommerce.service.OrderService;
-import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Transactional
 @Slf4j
 public class OrderServiceImpl implements OrderService {
 
-    private final CartService cartService;
-    private final UserRepository userRepository;
+    private final CartRepository cartRepository;
     private final OrderRepository orderRepository;
+    private final UserRepository userRepository;
     private final OrderMapper orderMapper;
 
     @Override
+    @CacheEvict(value = "cart", key = "#username")
     @Transactional
-    public OrderDTO placeOrder(String username) {
-        log.info("Placing order for user: {}", username);
+    public OrderResponse placeOrder(String username) {
+        log.info("Initiating order placement for user: {}", username);
 
+        // ===== USER VALIDATION =====
         User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found with username: " + username));
+                .orElseThrow(() -> {
+                    log.error("User not found: {}", username);
+                    return new UserNotFoundException(username);
+                });
 
-        List<CartDTO> cartItems = cartService.getCartByUsername(username);
-        if (cartItems.isEmpty()) {
-            throw new ResourceNotFoundException("Cart is empty for user: " + username);
+        // ===== CART VALIDATION =====
+        Cart cart = cartRepository.findByUser(user)
+                .orElseThrow(() -> {
+                    log.error("Cart not found for user: {}", username);
+                    return new ResourceNotFoundException("Cart not found");
+                });
+
+        if (cart.getItems().isEmpty()) {
+            log.warn("Order placement failed: Cart is empty for user {}", username);
+            throw new CartEmptyException("Cannot place order: Cart is empty");
         }
 
+        // ===== ORDER CREATION =====
         Order order = new Order();
         order.setUser(user);
+        order.setPlacedAt(LocalDateTime.now());
+        order.setStatus(OrderStatus.PENDING);
+        order.setTotalAmount(cart.getTotalPrice());
 
-        List<CartItem> orderItems = new ArrayList<>();
-        for (CartDTO cart : cartItems) {
-            for (ProductDTO product : cart.getProducts()) {
-                CartItem item = new CartItem();
-                item.setProductId(product.getId());
-                item.setQuantity(cart.getQuantity());
-                item.setPrice(product.getPrice());
-                orderItems.add(item);
-            }
+        List<OrderItem> orderItems = cart.getItems().stream().map(cartItem -> {
+            OrderItem item = new OrderItem();
+            item.setOrder(order);
+            item.setProduct(cartItem.getProduct());
+            item.setQuantity(cartItem.getQuantity());
+            item.setPriceSnapshot(cartItem.getPriceSnapshot());
+            return item;
+        }).toList();
+
+        order.setItems(orderItems);
+
+        // ===== PERSIST ORDER =====
+        Order savedOrder;
+        try {
+            savedOrder = orderRepository.save(order);
+            log.info("Order placed successfully for user {}: Order ID {}", username, savedOrder.getOrderId());
+        } catch (Exception e) {
+            log.error("Order persistence failed for user {}", username, e);
+            throw new RuntimeException("Order placement failed due to internal error");
         }
 
-        order.setCartItems(orderItems);
+        // ===== CART CLEANUP =====
+        cart.getItems().clear();
+        cart.setTotalPrice(0);
+        cartRepository.save(cart);
+        log.debug("Cart cleared after order placement for user {}", username);
 
-        double totalAmount = orderItems.stream()
-                .mapToDouble(i -> i.getPrice() * i.getQuantity())
-                .sum();
-        order.setTotalAmount(totalAmount);
-        order.setStatus(OrderStatus.CONFIRMED);
-        order.setOrderDate(LocalDateTime.now());
-
-        // clear cart
-        for (CartDTO cart : cartItems) {
-            cartService.removeFromCart(cart.getId(), username);
-        }
-
-        Order savedOrder = orderRepository.save(order);
-        log.info("Order placed successfully for user: {}", username);
-
-        return orderMapper.toDTO(savedOrder);
+        // ===== RESPONSE MAPPING =====
+        return orderMapper.toResponse(savedOrder);
     }
-
 }

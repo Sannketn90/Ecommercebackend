@@ -1,126 +1,162 @@
 package com.project.ecommerce.controller;
 
-
 import com.project.ecommerce.apiresponse.ApiResponse;
 import com.project.ecommerce.dto.*;
-import com.project.ecommerce.entity.User;
-import com.project.ecommerce.service.CartService;
-import com.project.ecommerce.service.OrderService;
-import com.project.ecommerce.service.ProductService;
-import com.project.ecommerce.service.UserService;
+import com.project.ecommerce.service.*;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api")
 @RequiredArgsConstructor
-@Tag(name = "E-Commerce API", description = "APIs for user authentication, product management, cart operations, and order processing")
+@Tag(name = "User & Product APIs")
+@Validated
 public class ApiController {
 
     private final UserService userService;
     private final ProductService productService;
     private final CartService cartService;
     private final OrderService orderService;
+    private final PaymentService paymentService;
+    // ===== AUTH =====
 
-
-    @Operation(summary = "User Signup", description = "Register a new user")
+    @Operation(summary = "User Signup")
     @PostMapping("/auth/signup")
     public ResponseEntity<ApiResponse<UserResponse>> signup(@Valid @RequestBody SignupRequest request) {
-        return ResponseEntity.ok(ApiResponse.success(userService.signup(request), "User registered successfully"));
+        UserResponse response = userService.signup(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response, "User registered successfully"));
     }
 
-    @Operation(summary = "User Login", description = "Authenticate a user and return a token")
+    @Operation(summary = "User Login")
     @PostMapping("/auth/login")
     public ResponseEntity<ApiResponse<UserResponse>> login(@Valid @RequestBody LoginRequest request) {
-        return ResponseEntity.ok(ApiResponse.success(userService.login(request), "User logged in successfully"));
+        UserResponse response = userService.login(request);
+        return ResponseEntity.ok(ApiResponse.success(response, "User logged in successfully"));
     }
 
-    @Operation(summary = "add a new product (admin only)", description = "Add a new product to the catalog (admin only)")
-    @PostMapping("/product/add")
+    // ===== PRODUCTS =====
+
+    @Operation(summary = "Create a new product (admin only)")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<ProductDTO>> addProduct(
-            @Valid @RequestBody ProductDTO productDTO,
-            Authentication authentication) {
+    @PostMapping("/products")
+    public ResponseEntity<ApiResponse<ProductDTO>> createProduct(
+            @Valid @RequestBody ProductRequest productRequest,
+            Authentication auth) {
 
-        ProductDTO savedProduct = productService.addProduct(productDTO, authentication.getName());
-        return ResponseEntity.ok(ApiResponse.success(savedProduct, "Product added successfully"));
+        ProductDTO saved = productService.addProduct(productRequest, auth.getName());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(saved, "Product created successfully"));
     }
 
-    @Operation(summary = "update a product (admin only)", description = "Update an existing product in the catalog (admin only)")
-    @PutMapping("/product/update/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<ProductDTO>> updateProduct(@PathVariable Long id,
-                                                                 @Valid @RequestBody ProductDTO productDTO,
-                                                                 Authentication authentication) {
-
-        User user = userService.findByUsername(authentication.getName());
-        ProductDTO updatedProduct = productService.updateProduct(id, productDTO, user.getId());
-        return ResponseEntity.ok(ApiResponse.success(updatedProduct, "Product updated successfully"));
-    }
-
-    @Operation(summary = "delete a product (admin only)", description = "Delete a product from the catalog (admin only)")
-    @DeleteMapping("/product/delete/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<Void>> deleteProduct(@PathVariable Long id, Authentication authentication) {
-        User user = userService.findByUsername(authentication.getName());
-        productService.deleteProduct(id, user.getId());
-        return ResponseEntity.ok(ApiResponse.success(null, "Product deleted successfully"));
-    }
-
-    @Operation(summary = "get all products", description = "Fetch all products from the catalog")
-    @GetMapping("/product/all")
+    @Operation(summary = "Get all products")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @GetMapping("/products")
     public ResponseEntity<ApiResponse<List<ProductDTO>>> getAllProducts() {
         List<ProductDTO> products = productService.getAllProducts();
         return ResponseEntity.ok(ApiResponse.success(products, "Products fetched successfully"));
     }
 
-    @Operation(summary = "add item to cart", description = "Add an item to the user's cart")
-    @PostMapping("/cart/add")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<CartDTO>> addToCart(@Valid @RequestBody CartRequest request, Authentication authentication) {
-
-        CartDTO cartDTO = cartService.addToCart(request, authentication.getName());
-        return ResponseEntity.ok(ApiResponse.success(cartDTO, "Item added to cart successfully"));
+    @Operation(summary = "Get product by ID")
+    @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
+    @GetMapping("/products/{id}")
+    public ResponseEntity<ApiResponse<ProductDTO>> getProduct(@PathVariable UUID id) {
+        ProductDTO product = productService.getById(id);
+        return ResponseEntity.ok(ApiResponse.success(product, "Product fetched successfully"));
     }
 
-    @Operation(summary = "get cart items", description = "Fetch all items in the user's cart")
-    @GetMapping("/cart")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<List<CartDTO>>> getCart(Authentication authentication) {
-        List<CartDTO> cartByUsername = cartService.getCartByUsername(authentication.getName());
-        return ResponseEntity.ok(ApiResponse.success(cartByUsername, "Cart fetched successfully"));
+    @Operation(summary = "Update a product (admin only)")
+    @PreAuthorize("hasRole('ADMIN')")
+    @PutMapping("/products/{id}")
+    public ResponseEntity<ApiResponse<ProductDTO>> updateProduct(
+            @PathVariable UUID id,
+            @Valid @RequestBody ProductRequest productRequest,
+            Authentication auth) {
+
+        ProductDTO updated = productService.updateProduct(id, productRequest, auth.getName());
+        return ResponseEntity.ok(ApiResponse.success(updated, "Product updated successfully"));
     }
 
-    @Operation(summary = "update cart item", description = "Update the quantity of an item in the user's cart")
-    @PutMapping("/cart/update")
+    @Operation(summary = "Delete a product (admin only)")
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/products/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable UUID id, Authentication auth) {
+        productService.deleteProduct(id, auth.getName());
+        return ResponseEntity.noContent().build();
+    }
+    // ===== CARTS =====
+
+    @Operation(summary = "Get current user's cart")
+    @GetMapping("/carts")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<CartDTO>> updateCart(@Valid @RequestBody CartUpdateRequest request, Authentication authentication) {
-        CartDTO cartDTO = cartService.updateCart(request, authentication.getName());
-        return ResponseEntity.ok(ApiResponse.success(cartDTO, "Cart item updated successfully"));
+    public ResponseEntity<ApiResponse<CartResponse>> getCart(Authentication auth) {
+        CartResponse response = cartService.getCart(auth.getName());
+        return ResponseEntity.ok(ApiResponse.success(response, "Cart fetched successfully"));
     }
 
-    @Operation(summary = "remove cart item", description = "Remove an item from the user's cart")
-    @DeleteMapping("/cart/remove/{cartId}")
+    @Operation(summary = "Add product to cart")
+    @PostMapping("/carts")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<Void>> removeFromCart(@PathVariable Long cartId, Authentication authentication) {
-        cartService.removeFromCart(cartId, authentication.getName());
-        return ResponseEntity.ok(ApiResponse.success(null, "Cart item removed successfully"));
+    public ResponseEntity<ApiResponse<CartResponse>> addToCart(@Valid @RequestBody CartRequest request, Authentication auth) {
+        CartResponse response = cartService.addToCart(auth.getName(), request);
+        return ResponseEntity.ok(ApiResponse.success(response, "Product added to cart"));
     }
 
-    @Operation(summary = "place order", description = "Place an order for the items in the user's cart")
-    @PostMapping("/order/place")
+    @Operation(summary = "Update quantity of a cart item")
+    @PutMapping("/carts/{itemId}")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<OrderDTO>> placeOrder(Authentication authentication) {
-        OrderDTO orderDTO = orderService.placeOrder(authentication.getName());
-        return ResponseEntity.ok(ApiResponse.success(orderDTO, "Order placed successfully"));
+    public ResponseEntity<ApiResponse<CartResponse>> updateItem(@PathVariable UUID itemId,
+                                                                @RequestParam int quantity,
+                                                                Authentication auth) {
+        CartResponse response = cartService.updateItem(auth.getName(), itemId, quantity);
+        return ResponseEntity.ok(ApiResponse.success(response, "Cart item updated"));
     }
+
+    @Operation(summary = "Remove item from cart")
+    @DeleteMapping("/carts/{itemId}")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<Void>> removeItem(@PathVariable UUID itemId, Authentication auth) {
+        cartService.removeItem(auth.getName(), itemId);
+        return ResponseEntity.noContent().build();
+    }
+
+
+    @Operation(summary = "Clear entire cart")
+    @DeleteMapping("/carts")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<Void>> clearCart(Authentication auth) {
+        cartService.clearCart(auth.getName());
+        return ResponseEntity.ok(ApiResponse.success(null, "Cart cleared"));
+    }
+
+    // ===== PLACE ORDERS =====
+    @Operation(summary = "Place an order from cart")
+    @PostMapping("/orders")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<OrderResponse>> placeOrder(Authentication auth) {
+        OrderResponse response = orderService.placeOrder(auth.getName());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success(response, "Order placed successfully"));
+    }
+    // ==== PAYMENT =====
+    @Operation(summary = "Initiate payment for an order")
+    @PreAuthorize("hasRole('USER')")
+    @PostMapping("/payment/{orderId}")
+    public ResponseEntity<ApiResponse<PaymentResponse>> initiatePayment(@PathVariable UUID orderId, Authentication auth) {
+        PaymentResponse paymentResponse = paymentService.processPayment(orderId, auth.getName());
+        return ResponseEntity.ok(ApiResponse.success(paymentResponse, "Payment successful"));
+    }
+
 
 }

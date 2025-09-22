@@ -1,16 +1,29 @@
 package com.project.ecommerce.mapper;
 
-import com.project.ecommerce.dto.CartDTO;
+import com.project.ecommerce.dto.CartItemDTO;
+import com.project.ecommerce.dto.CartResponse;
 import com.project.ecommerce.entity.Cart;
+import com.project.ecommerce.entity.CartItem;
 import org.mapstruct.Mapper;
 import org.mapstruct.Mapping;
 
-@Mapper(componentModel = "spring", uses = {ProductMapper.class})
+import java.util.List;
+
+@Mapper(componentModel = "spring")
 public interface CartMapper {
 
-    @Mapping(source = "user.username", target = "username")
-    CartDTO toDTO(Cart cart);
+    @Mapping(source = "product.name", target = "productName")
+    CartItemDTO toDTO(CartItem item);
 
-    @Mapping(source = "username", target = "user.username")
-    Cart toEntity(CartDTO dto);
+    default CartResponse toCartResponse(Cart cart) {
+        List<CartItemDTO> items = cart.getItems().stream()
+                .map(this::toDTO)
+                .toList();
+
+        CartResponse response = new CartResponse();
+        response.setCartId(cart.getCartId());
+        response.setItems(items);
+        response.setTotalPrice(cart.getTotalPrice());
+        return response;
+    }
 }

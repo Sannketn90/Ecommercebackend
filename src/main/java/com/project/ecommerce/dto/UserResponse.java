@@ -2,17 +2,19 @@ package com.project.ecommerce.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.project.ecommerce.entity.Role;
+import lombok.Builder;
 import lombok.Data;
 
+import java.util.UUID;
 
 @Data
+@Builder
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class UserResponse {
 
-    private Long id;
+    private UUID userId;
     private String username;
-    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private String email;
     private Role role;
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     private String token;
 }
-

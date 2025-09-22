@@ -1,17 +1,18 @@
 package com.project.ecommerce;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.cache.annotation.EnableCaching;
+import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 
 @SpringBootApplication
-@Slf4j
+@EnableCaching
+@EnableJpaAuditing
 public class EcommercebackendApplication {
 
 	public static void main(String[] args) {
 		SpringApplication.run(EcommercebackendApplication.class, args);
-		log.info("Hello, Ecommerce Backend Application has started successfully!");
-		log.info("Visit the API documentation at: http://localhost:8080/swagger-ui/index.html");
+
 	}
 
 }
