@@ -88,7 +88,6 @@ public class OrderServiceImpl implements OrderService {
         cartRepository.save(cart);
         log.debug("Cart cleared after order placement for user {}", username);
 
-        // ===== RESPONSE MAPPING =====
         return orderMapper.toResponse(savedOrder);
     }
 }
