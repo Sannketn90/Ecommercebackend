@@ -73,7 +73,6 @@ public class OrderServiceImpl implements OrderService {
 
         order.setItems(orderItems);
 
-        // ===== PERSIST ORDER =====
         Order savedOrder;
         try {
             savedOrder = orderRepository.save(order);
