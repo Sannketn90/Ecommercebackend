@@ -12,6 +12,7 @@ import java.util.UUID;
 @Entity
 @Data
 @Builder
+@Table
 @NoArgsConstructor
 @AllArgsConstructor
 public class Payment {
