@@ -126,7 +126,7 @@ public class ProductServiceImpl implements ProductService {
         return productMapper.toDTO(getProductOrThrow(productId));
     }
 
-    // ================= INTERNAL =================
+   
     private Product getProductOrThrow(UUID productId) {
         return productRepository.findById(productId)
                 .orElseThrow(() -> {
